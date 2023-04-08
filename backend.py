@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from divideText import get_chunks
 from pymongo import MongoClient
 from cosine import cosineSimilarity
+from retriveData import fetchData
+from relevantDocument import findRelevantDocument
 import torch
 app=FastAPI()
 origins = ["*"]
@@ -32,11 +34,9 @@ dbCapstone=client.Capstone
 collection=dbCapstone.Documents
 
 
-@app.post("/question")
-async def root(qs:Request):
-  q=await qs.json()
-  question=q["question"]
-  input_ids = tokenizer.encode(question, text)
+def bert(question,data):
+
+  input_ids = tokenizer.encode(question, data)
 
   tokens = tokenizer.convert_ids_to_tokens(input_ids)
 
@@ -51,6 +51,10 @@ async def root(qs:Request):
   assert len(segment_ids) == len(input_ids)
 
   output = model(torch.tensor([input_ids]), token_type_ids=torch.tensor([segment_ids]))
+  start_scores = output.start_logits.detach().numpy().flatten()
+  end_scores = output.end_logits.detach().numpy().flatten()
+  startMax=max(start_scores)
+  endMax=max(end_scores)
 
   answer_start = torch.argmax(output.start_logits)
   answer_end = torch.argmax(output.end_logits)
@@ -58,16 +62,38 @@ async def root(qs:Request):
 
   if answer_end >= answer_start:
     answer = tokens[answer_start]
-  for i in range(answer_start+1, answer_end+1):
-    if tokens[i][0:2] == "##":
-      answer += tokens[i][2:]
-    else:
-      answer += " " + tokens[i]
+    for i in range(answer_start+1, answer_end+1):
+      if tokens[i][0:2] == "##":
+        answer += tokens[i][2:]
+      else:
+        answer += " " + tokens[i]
+  else:
+    return {"answer":"Unable to find the answer to your question.","weight":-1}
 
   if answer.startswith("[CLS]"):
     answer = "Unable to find the answer to your question."
-  print("\nPredicted Answer:\n{}".format(answer.capitalize()))
-  return {"answer":answer}
+  return {"answer":answer,"weight":endMax+startMax}
+
+@app.post("/question")
+async def root(qs:Request):
+  q=await qs.json()
+  question=q["question"]
+  documentsDic=fetchData(collection)
+  maxVal=-1
+  ans=""
+  relevantDocuments=findRelevantDocument(documentsDic,question)
+  print(relevantDocuments)
+  for doc in relevantDocuments:
+    pair=bert(question,doc.document)
+    print(pair)
+    w=pair["weight"]
+    if w>maxVal:
+      maxVal=w
+      ans=pair["answer"]
+  print(ans)
+  return ans
+
+
 
 @app.post('/upload')
 async def uploadData(data:Request):
@@ -75,13 +101,14 @@ async def uploadData(data:Request):
   text=obj["data"]
   chuncks=get_chunks(text,400)
   for document in chuncks:
-    collection.insert_one({document:document})
+    collection.insert_one({"document":document})
 
-Document1 = """what is the name of my university?"""
 
-Document2 = """During their tenure in the University, students get exposure to an academic environment which is different from their future work environment, viz. industry, wherein they are expected to be placed. To get this exposure, all students (B.Tech., M.Tech.Integrated, B.Des. Industrial Design, BBA, B.Sc. Catering and Hotel Management) should undergo four weeks of industrial internship in a reputed industry in their respective discipline of study, any time after their first year of study. The industrial internship."""
 
-print(cosineSimilarity(Document1,Document2))
+
+
+
+
 
 
 
