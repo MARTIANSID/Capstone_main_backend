@@ -32,6 +32,7 @@ databaseName = 'chatbot'
 client = MongoClient("mongodb+srv://sidharthbansal2301:bDrTm2aK2OXUi8Mq@chatbot.kafcl1k.mongodb.net/?retryWrites=true&w=majority")
 dbCapstone=client.Capstone
 collection=dbCapstone.Documents
+feedbackCollection=dbCapstone.FeedbackDocuments
 
 
 def bert(question,data):
@@ -102,6 +103,16 @@ async def uploadData(data:Request):
   chuncks=get_chunks(text,400)
   for document in chuncks:
     collection.insert_one({"document":document})
+
+@app.post('/feeback')
+async def feedback(data:Request):
+  feed=await data.json()
+  userName=feed["username"]
+  feedbackText=feed["feedback"]
+  feedbackCollection.insert_one({
+    "username": userName,
+    "feedback": feedbackText
+  })
 
 
 
